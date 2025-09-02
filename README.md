@@ -1,7 +1,6 @@
 # AWS DevOps Sample: **EC2 Arcade** (Snake 🐍, Tic-Tac-Toe ❌⭕, 4096 🔢)
 
-Deploy a tiny “arcade” to AWS EC2 using **Terraform**, **cloud-init**, **Nginx** (static hosting), and a small **Flask** `/api/health`.  
-No ECR/ECS required — works great in lab environments (e.g., KodeKloud) where container registries aren’t available.
+Deploy to AWS EC2 using **Terraform**, **cloud-init**, **Nginx** (static hosting), and a small **Flask** `/api/health`.  
 
 ## ✨ What you’ll build
 - **EC2 (Amazon Linux 2023)** in the default VPC
