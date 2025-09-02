@@ -1,0 +1,571 @@
+#cloud-config
+package_update: true
+packages:
+  - python3
+  - python3-pip
+  - nginx
+
+write_files:
+  - path: /opt/arcade/root/index.html
+    permissions: '0644'
+    content: |
+      <!doctype html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Arcade 🎮</title>
+        <link rel="stylesheet" href="/style.css">
+      </head>
+      <body>
+        <div class="wrap">
+          <h1>Arcade 🎮</h1>
+          <p class="hint">Type a game name and hit <strong>Go</strong>, or click a card.</p>
+          <div class="go">
+            <input id="game" placeholder="e.g., snake / tic tac toe / 4096" />
+            <button id="go">Go</button>
+          </div>
+          <div class="cards">
+            <a class="card" href="/snake/"><h3>Snake 🐍</h3><p>Arrow keys / WASD</p></a>
+            <a class="card" href="/ttt/"><h3>Tic‑Tac‑Toe ❌⭕</h3><p>2P or Vs Computer</p></a>
+            <a class="card" href="/4096/"><h3>4096 🔢</h3><p>Slide to combine</p></a>
+          </div>
+          <p class="hint">Health: <code id="health">checking…</code></p>
+        </div>
+        <script>
+        async function health(){
+          try{ const r=await fetch('/api/health'); document.getElementById('health').textContent = await r.text(); }
+          catch(e){ document.getElementById('health').textContent='unreachable'; }
+        }
+        function route(q){
+          q=q.toLowerCase().trim();
+          if (!q) return '/';
+          if (['snake','arrow','arrows'].some(s=>q.includes(s))) return '/snake/';
+          if (['tic','tictactoe','tic-tac-toe','toe','ttt'].some(s=>q.replace(/\s|-/g,'').includes(s))) return '/ttt/';
+          if (['4096','2048','numbers','tiles'].some(s=>q.includes(s))) return '/4096/';
+          return '/';
+        }
+        document.getElementById('go').onclick = ()=>{
+          const q=document.getElementById('game').value;
+          location.href = route(q);
+        };
+        document.getElementById('game').addEventListener('keydown', e=>{
+          if (e.key==='Enter') document.getElementById('go').click();
+        });
+        health();
+        </script>
+      </body>
+      </html>
+  - path: /opt/arcade/root/style.css
+    permissions: '0644'
+    content: |
+      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica,Arial,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;display:grid;place-items:center;min-height:100vh}
+      .wrap{width:min(92vw,860px);padding:24px;background:#111827;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.3);text-align:center}
+      h1{margin-top:0;font-size:30px}
+      .hint{color:#a3a3a3}
+      .go{display:flex;gap:8px;justify-content:center;margin:14px 0}
+      .go input{width:320px;max-width:70vw;padding:10px 12px;border-radius:10px;border:1px solid #374151;background:#0b1220;color:#e5e7eb}
+      .go button{background:#1f2937;border:0;color:#e5e7eb;padding:10px 16px;border-radius:10px;cursor:pointer}
+      .go button:hover{background:#374151}
+      .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px}
+      .card{display:block;padding:16px;border-radius:12px;background:#0b1220;text-decoration:none;color:#e5e7eb;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+      .card:hover{background:#0f172a}
+
+  - path: /opt/arcade/snake/index.html
+    permissions: '0644'
+    content: |
+      <!doctype html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Snake 🐍</title>
+        <link rel="stylesheet" href="/snake/style.css">
+      </head>
+      <body>
+        <div class="wrap">
+          <h1>Snake 🐍</h1>
+          <canvas id="board" width="480" height="480"></canvas>
+          <div class="hud">
+            <span>Score: <strong id="score">0</strong></span>
+            <button id="restart">Restart</button>
+            <button id="pause">Pause</button>
+            <a href="/" style="margin-left:12px">← Arcade</a>
+          </div>
+          <p class="hint">Use arrow keys or WASD to move.</p>
+        </div>
+        <script src="/snake/app.js"></script>
+      </body>
+      </html>
+  - path: /opt/arcade/snake/style.css
+    permissions: '0644'
+    content: |
+      .wrap{max-width:560px;padding:24px;background:#111827;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.3);text-align:center;margin:24px}
+      canvas{background:#020617;border-radius:8px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05);display:block;margin:0 auto}
+      .hud{margin:12px 0;display:flex;gap:12px;justify-content:center;align-items:center}
+      button{background:#1f2937;border:0;color:#e5e7eb;padding:8px 12px;border-radius:10px;cursor:pointer}
+      button:hover{background:#374151}
+      .hint{color:#a3a3a3;font-size:13px}
+  - path: /opt/arcade/snake/app.js
+    permissions: '0644'
+    content: |
+      // Snake game
+      const cvs = document.getElementById('board');
+      const ctx = cvs.getContext('2d');
+      const scoreEl = document.getElementById('score');
+      const restartBtn = document.getElementById('restart');
+      const pauseBtn = document.getElementById('pause');
+      
+      const size = 24;
+      const cells = cvs.width / size;
+      
+      let snake, dir, food, score, playing, timer;
+      
+      function init() {
+        snake = [{x:10,y:10}];
+        dir = {x:1,y:0};
+        food = spawnFood();
+        score = 0;
+        playing = true;
+        updateScore();
+        if (timer) clearInterval(timer);
+        timer = setInterval(tick, 110);
+      }
+      
+      function spawnFood() {
+        let f;
+        do { f = {x: Math.floor(Math.random()*cells), y: Math.floor(Math.random()*cells)}; }
+        while (snake.some(s => s.x===f.x && s.y===f.y));
+        return f;
+      }
+      
+      function tick() {
+        if (!playing) return;
+        const head = {x: snake[0].x + dir.x, y: snake[0].y + dir.y};
+        head.x = (head.x + cells) % cells;
+        head.y = (head.y + cells) % cells;
+      
+        if (snake.some((s,i) => i && s.x===head.x && s.y===head.y)) {
+          playing = false;
+          alert('Game over! Score: ' + score);
+          return;
+        }
+        snake.unshift(head);
+      
+        if (head.x === food.x && head.y === food.y) {
+          score++; updateScore(); food = spawnFood();
+        } else {
+          snake.pop();
+        }
+        draw();
+      }
+      
+      function draw() {
+        ctx.clearRect(0,0,cvs.width,cvs.height);
+        ctx.globalAlpha = 0.07;
+        for (let i=0;i<cells;i++){ for (let j=0;j<cells;j++){ ctx.fillRect(i*size, j*size, size-1, size-1); } }
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(food.x*size, food.y*size, size, size);
+        ctx.fillStyle = '#22c55e';
+        snake.forEach(s=>{ ctx.fillRect(s.x*size, s.y*size, size, size); });
+      }
+      
+      function updateScore(){ scoreEl.textContent = score; }
+      
+      window.addEventListener('keydown', (e) => {
+        const k = e.key.toLowerCase();
+        if ((k==='arrowup' || k==='w') && dir.y!==1)  dir={x:0,y:-1};
+        if ((k==='arrowdown'|| k==='s') && dir.y!==-1) dir={x:0,y:1};
+        if ((k==='arrowleft'|| k==='a') && dir.x!==1)  dir={x:-1,y:0};
+        if ((k==='arrowright'||k==='d') && dir.x!==-1) dir={x:1,y:0};
+      });
+      
+      restartBtn.onclick = init;
+      pauseBtn.onclick = () => { playing = !playing; pauseBtn.textContent = playing ? 'Pause' : 'Resume'; };
+      init();
+
+  - path: /opt/ttt/index.html
+    permissions: '0644'
+    content: |
+      <!doctype html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Tic‑Tac‑Toe ❌⭕</title>
+        <link rel="stylesheet" href="/ttt/style.css">
+      </head>
+      <body>
+        <div class="wrap">
+          <h1>Tic‑Tac‑Toe ❌⭕</h1>
+          <div class="board" id="board"></div>
+          <div class="hud">
+            <span>Turn: <strong id="turn">X</strong></span>
+            <span>Mode: 
+              <select id="mode">
+                <option value="pvp">2 Players</option>
+                <option value="ai" selected>Vs Computer</option>
+              </select>
+            </span>
+            <button id="reset">Reset</button>
+            <a href="/" style="margin-left:12px">← Arcade</a>
+          </div>
+          <p class="msg" id="msg"></p>
+        </div>
+        <script src="/ttt/app.js"></script>
+      </body>
+      </html>
+  - path: /opt/ttt/style.css
+    permissions: '0644'
+    content: |
+      .wrap{width:min(92vw,520px);padding:24px;background:#111827;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.3);text-align:center;margin:24px}
+      h1{margin-top:0;font-size:28px}
+      .board{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:20px auto;max-width:360px}
+      .cell{width:112px;height:112px;display:grid;place-items:center;font-size:64px;background:#0b1220;border-radius:12px;cursor:pointer;user-select:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+      .cell:hover{background:#0f172a}
+      .hud{display:flex;gap:12px;justify-content:center;align-items:center;flex-wrap:wrap;margin:8px 0 0}
+      button,select{background:#1f2937;border:0;color:#e5e7eb;padding:8px 12px;border-radius:10px;cursor:pointer}
+      button:hover,select:hover{background:#374151}
+      .msg{min-height:24px;color:#a3a3a3}
+  - path: /opt/ttt/app.js
+    permissions: '0644'
+    content: |
+      const boardEl = document.getElementById('board');
+      const turnEl  = document.getElementById('turn');
+      const msgEl   = document.getElementById('msg');
+      const resetBtn = document.getElementById('reset');
+      const modeSel = document.getElementById('mode');
+      
+      let board, player, over;
+      
+      const lines = [
+        [0,1,2],[3,4,5],[6,7,8],
+        [0,3,6],[1,4,7],[2,5,8],
+        [0,4,8],[2,4,6],
+      ];
+      
+      function init(){
+        board = Array(9).fill(null);
+        player = 'X';
+        over = false;
+        turnEl.textContent = player;
+        msgEl.textContent = '';
+        render();
+        if (modeSel.value==='ai' && player==='O') aiMove();
+      }
+      
+      function render(){
+        boardEl.innerHTML='';
+        board.forEach((v,i)=>{
+          const d=document.createElement('div');
+          d.className='cell';
+          d.textContent = v ? v : '';
+          d.addEventListener('click', ()=> clickCell(i));
+          boardEl.appendChild(d);
+        });
+      }
+      
+      function clickCell(i){
+        if (over || board[i]) return;
+        board[i]=player;
+        const w = winner(board);
+        if (w){ end(w); render(); return; }
+        if (isFull(board)){ end(null); render(); return; }
+        player = player==='X' ? 'O' : 'X';
+        turnEl.textContent = player;
+        render();
+      
+        if (modeSel.value==='ai' && player==='O'){
+          setTimeout(aiMove, 150);
+        }
+      }
+      
+      function end(w){
+        over = true;
+        msgEl.textContent = w ? ('Winner: ' + w) : 'Draw';
+      }
+      
+      function isFull(b){ return b.every(x=>x); }
+      
+      function winner(b){
+        for (const [a,b1,c] of lines){
+          if (b[a] && b[a]===b[b1] && b[a]===b[c]) return b[a];
+        }
+        return null;
+      }
+      
+      function aiMove(){
+        const move = bestMove(board);
+        if (move!=null){
+          board[move]='O';
+          const w = winner(board);
+          if (w){ end(w); render(); return; }
+          if (isFull(board)){ end(null); render(); return; }
+          player='X';
+          turnEl.textContent=player;
+          render();
+        }
+      }
+      
+      function bestMove(b){
+        let bestScore = Infinity;
+        let move = null;
+        for (let i=0;i<9;i++){
+          if (!b[i]){
+            b[i]='O';
+            const score = minimax(b, 0, true);
+            b[i]=null;
+            if (score < bestScore){
+              bestScore = score;
+              move = i;
+            }
+          }
+        }
+        return move;
+      }
+      
+      function minimax(b, depth, isMax){
+        const w = winner(b);
+        if (w==='X') return 10 - depth;
+        if (w==='O') return depth - 10;
+        if (isFull(b)) return 0;
+      
+        if (isMax){
+          let best = -Infinity;
+          for (let i=0;i<9;i++){
+            if (!b[i]){
+              b[i]='X';
+              best = Math.max(best, minimax(b, depth+1, false));
+              b[i]=null;
+            }
+          }
+          return best;
+        } else {
+          let best = Infinity;
+          for (let i=0;i<9;i++){
+            if (!b[i]){
+              b[i]='O';
+              best = Math.min(best, minimax(b, depth+1, true));
+              b[i]=null;
+            }
+          }
+          return best;
+        }
+      }
+      
+      resetBtn.onclick = init;
+      modeSel.onchange = init;
+      init();
+
+  - path: /opt/4096/index.html
+    permissions: '0644'
+    content: |
+      <!doctype html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>4096 🔢</title>
+        <link rel="stylesheet" href="/4096/style.css">
+      </head>
+      <body>
+        <div class="wrap">
+          <h1>4096 🔢</h1>
+          <div class="hud">
+            <span>Score: <strong id="score">0</strong></span>
+            <a href="/" style="margin-left:12px">← Arcade</a>
+          </div>
+          <div id="board" class="board"></div>
+          <p class="hint">Use arrow keys or WASD. Reach 4096!</p>
+        </div>
+        <script src="/4096/app.js"></script>
+      </body>
+      </html>
+  - path: /opt/4096/style.css
+    permissions: '0644'
+    content: |
+      .wrap{width:min(92vw,520px);padding:24px;background:#111827;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.3);text-align:center;margin:24px}
+      .board{display:grid;grid-template-columns:repeat(4,88px);grid-gap:10px;justify-content:center;margin:14px auto}
+      .tile{width:88px;height:88px;display:grid;place-items:center;border-radius:12px;font-size:26px;font-weight:700;background:#0b1220;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);color:#e5e7eb}
+      .n2{background:#475569}.n4{background:#334155}.n8{background:#2563eb}.n16{background:#1d4ed8}
+      .n32{background:#0ea5e9}.n64{background:#059669}.n128{background:#16a34a}.n256{background:#84cc16}
+      .n512{background:#eab308}.n1024{background:#f59e0b}.n2048{background:#ef4444}.n4096{background:#db2777}
+      .hint{color:#a3a3a3}
+      .hud{display:flex;gap:12px;justify-content:center;align-items:center;flex-wrap:wrap;margin:8px 0 14px}
+  - path: /opt/4096/app.js
+    permissions: '0644'
+    content: |
+      const boardEl = document.getElementById('board');
+      const scoreEl = document.getElementById('score');
+      let grid, score;
+      
+      function init(){
+        grid = Array(4).fill(null).map(()=>Array(4).fill(0));
+        score = 0;
+        addRandom(); addRandom();
+        render();
+      }
+      function addRandom(){
+        const empty=[];
+        for(let r=0;r<4;r++)for(let c=0;c<4;c++) if(!grid[r][c]) empty.push([r,c]);
+        if(!empty.length) return;
+        const [r,c]=empty[Math.floor(Math.random()*empty.length)];
+        grid[r][c] = Math.random()<0.9 ? 2 : 4;
+      }
+      function render(){
+        boardEl.innerHTML='';
+        for(let r=0;r<4;r++){
+          for(let c=0;c<4;c++){
+            const v = grid[r][c];
+            const d = document.createElement('div');
+            d.className='tile'+(v?(' n'+v):'');
+            d.textContent = v||'';
+            boardEl.appendChild(d);
+          }
+        }
+        scoreEl.textContent = score;
+      }
+      function compress(row){
+        const a = row.filter(v=>v);
+        for(let i=0;i<a.length-1;i++){
+          if(a[i]===a[i+1]){ a[i]*=2; score+=a[i]; a.splice(i+1,1); }
+        }
+        while(a.length<4) a.push(0);
+        return a;
+      }
+      function moveLeft(){
+        let moved=false;
+        for(let r=0;r<4;r++){
+          const before=grid[r].slice();
+          const after=compress(before);
+          grid[r]=after;
+          if(!arraysEqual(before,after)) moved=true;
+        }
+        return moved;
+      }
+      function moveRight(){
+        let moved=false;
+        for(let r=0;r<4;r++){
+          const before=grid[r].slice().reverse();
+          const after=compress(before).reverse();
+          if(!arraysEqual(grid[r],after)) moved=true;
+          grid[r]=after;
+        }
+        return moved;
+      }
+      function moveUp(){
+        let moved=false;
+        for(let c=0;c<4;c++){
+          const col=[grid[0][c],grid[1][c],grid[2][c],grid[3][c]];
+          const after=compress(col);
+          for(let r=0;r<4;r++){ if(grid[r][c]!==after[r]) moved=true; grid[r][c]=after[r]; }
+        }
+        return moved;
+      }
+      function moveDown(){
+        let moved=false;
+        for(let c=0;c<4;c++){
+          const col=[grid[3][c],grid[2][c],grid[1][c],grid[0][c]];
+          const after=compress(col).reverse();
+          for(let r=0;r<4;r++){ if(grid[r][c]!==after[r]) moved=true; grid[r][c]=after[r]; }
+        }
+        return moved;
+      }
+      function arraysEqual(a,b){ return a.length===b.length && a.every((v,i)=>v===b[i]); }
+      function won(){ return grid.flat().some(v=>v>=4096); }
+      function canMove(){
+        if (grid.flat().some(v=>v===0)) return true;
+        for(let r=0;r<4;r++)for(let c=0;c<4;c++){
+          const v=grid[r][c];
+          if (r<3 && grid[r+1][c]===v) return true;
+          if (c<3 && grid[r][c+1]===v) return true;
+        }
+        return false;
+      }
+      function handle(dir){
+        let moved=false;
+        if(dir==='left') moved=moveLeft();
+        if(dir==='right') moved=moveRight();
+        if(dir==='up') moved=moveUp();
+        if(dir==='down') moved=moveDown();
+        if(moved){ addRandom(); render(); }
+        if(won()) setTimeout(()=>alert('You reached 4096!'),10);
+        else if(!canMove()) setTimeout(()=>alert('Game over!'),10);
+      }
+      window.addEventListener('keydown', e=>{
+        const k=e.key.toLowerCase();
+        if(k==='arrowleft'||k==='a') handle('left');
+        if(k==='arrowright'||k==='d') handle('right');
+        if(k==='arrowup'||k==='w') handle('up');
+        if(k==='arrowdown'||k==='s') handle('down');
+      });
+      init();
+
+  - path: /opt/app/app.py
+    permissions: '0644'
+    content: |
+      from flask import Flask, jsonify
+      app = Flask(__name__)
+      @app.get("/health")
+      def health():
+          return jsonify(status="ok")
+      if __name__ == "__main__":
+          app.run(host="0.0.0.0", port=5000)
+
+  - path: /etc/systemd/system/flask.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Flask for /api/health
+      After=network.target
+
+      [Service]
+      User=ec2-user
+      WorkingDirectory=/opt/app
+      ExecStart=/usr/bin/python3 -m flask --app app:app run --host 0.0.0.0 --port 5000
+      Restart=always
+      Environment=PORT=5000
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/nginx/conf.d/arcade.conf
+    permissions: '0644'
+    content: |
+      server {
+          listen 80 default_server;
+          server_name _;
+          root /opt/arcade/root;
+          index index.html;
+          location /snake/ {
+              alias /opt/arcade/snake/;
+              try_files $uri $uri/ /snake/index.html;
+          }
+          location /ttt/ {
+              alias /opt/ttt/;
+              try_files $uri $uri/ /ttt/index.html;
+          }
+          location /4096/ {
+              alias /opt/4096/;
+              try_files $uri $uri/ /4096/index.html;
+          }
+          location /api/health {
+              proxy_pass http://127.0.0.1:5000/health;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+          }
+      }
+
+runcmd:
+  - [ bash, -lc, "id -u ec2-user || useradd -m ec2-user" ]
+  - [ bash, -lc, "chown -R ec2-user:ec2-user /opt/app /opt/arcade /opt/ttt /opt/4096" ]
+  - [ bash, -lc, "python3 -m pip install --upgrade pip || true" ]
+  - [ bash, -lc, "python3 -m pip install flask" ]
+  - [ bash, -lc, "rm -f /etc/nginx/conf.d/default.conf || true" ]
+  - [ bash, -lc, "systemctl daemon-reload" ]
+  - [ bash, -lc, "systemctl enable --now flask.service" ]
+  - [ bash, -lc, "nginx -t && systemctl enable --now nginx && systemctl reload nginx" ]
+  - [ bash, -lc, "curl -sf http://127.0.0.1/index.html >/dev/null || (journalctl -u nginx --no-pager | tail -n 80)" ]
